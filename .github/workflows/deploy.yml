@@ -82,7 +82,6 @@ jobs:
         run: |
           if ! flyctl apps list | grep -q "^${{ env.fly_app_name }} "; then
 
-            # Run launch from inside nextcloud/ where the Dockerfile lives
             cd nextcloud
 
             flyctl launch \
@@ -112,8 +111,12 @@ jobs:
               --database-user nextcloud
           fi
 
-          # Substitute all placeholders in fly.toml
           cd nextcloud
+
+          # Restore our fly.toml template from git (overwrite whatever flyctl generated)
+          git checkout fly.toml
+
+          # Substitute all placeholders
           sed -i "s|%fly_app_name%|${{ env.fly_app_name }}|g"     fly.toml
           sed -i "s|%fly_app_region%|${{ env.fly_app_region }}|g"  fly.toml
           sed -i "s|%redis_host%|${{ env.REDIS_HOST }}|g"          fly.toml
