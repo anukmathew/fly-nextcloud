@@ -15,8 +15,6 @@ jobs:
       fly_org: ${{ secrets.FLY_ORG }}
       fly_app_name: ${{ secrets.FLY_APP_NAME }}
       fly_app_region: ${{ secrets.FLY_APP_REGION }}
-      fly_db_password: ${{ secrets.FLY_DB_PASSWORD }}
-      fly_redis_password: ${{ secrets.FLY_REDIS_PASSWORD }}
       s3_bucket_name: ${{ secrets.S3_BUCKET_NAME }}
       s3_endpoint: ${{ secrets.S3_ENDPOINT }}
       s3_access_key: ${{ secrets.S3_ACCESS_KEY }}
@@ -24,78 +22,114 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Setup Fly
         uses: superfly/flyctl-actions/setup-flyctl@1.5
 
-      - name: Deploy & Check Postgres Cluster
+      # ----------------------------------------------------------------
+      # MANAGED POSTGRES (fly mpg)
+      # Fully managed by fly.io — backups, HA, failover included.
+      # Creates a nextcloud database inside the cluster after creation.
+      # ----------------------------------------------------------------
+      - name: Deploy & Check Managed Postgres
         run: |
-          if [ -z "$(flyctl pg list | grep ${{ env.fly_app_name }}-db)" ]; then
-              flyctl pg create --name "${{ env.fly_app_name }}-db" \
-                            -o "${{ env.fly_org }}" \
-                            --region "${{ env.fly_app_region }}" \
-                            --vm-size "shared-cpu-1x" \
-                            --volume-size "1" \
-                            --initial-cluster-size "1" \
-                            --password "${{ env.fly_db_password }}"
+          if flyctl mpg list -o "${{ env.fly_org }}" | grep -q "${{ env.fly_app_name }}-db"; then
+            echo "Managed Postgres already exists, skipping."
+          else
+            flyctl mpg create \
+              --name "${{ env.fly_app_name }}-db" \
+              -o "${{ env.fly_org }}" \
+              --region "${{ env.fly_app_region }}" \
+              --plan basic \
+              --volume-size 10
+
+            # Create the nextcloud database inside the cluster
+            CLUSTER_ID=$(flyctl mpg list -o "${{ env.fly_org }}" --json | jq -r '.[] | select(.Name=="${{ env.fly_app_name }}-db") | .ID')
+            flyctl mpg databases create \
+              --cluster "$CLUSTER_ID" \
+              --name nextcloud
           fi
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
-      - name: Deploy Redis App
+      # ----------------------------------------------------------------
+      # MANAGED REDIS (Upstash)
+      # Fully managed by Upstash via fly.io — no VM, no Dockerfile.
+      # ----------------------------------------------------------------
+      - name: Deploy & Check Managed Redis
         run: |
-          if [ -z "$(flyctl apps list | grep '${{ env.fly_app_name }}-redis')" ]; then
-              flyctl launch --name ${{ env.fly_app_name }}-redis \
-                         --no-deploy \
-                         --org ${{ env.fly_org }} \
-                         --region ${{ env.fly_app_region }}
-
-              flyctl volumes create redis_data \
-                 --size 1 \
-                 --region ${{ env.fly_app_region }} \
-                 --app ${{ env.fly_app_name }}-redis \
-                 --yes
-
-              rm fly.toml
+          if flyctl redis list -o "${{ env.fly_org }}" | grep -q "${{ env.fly_app_name }}-redis"; then
+            echo "Redis already exists, fetching connection details."
+          else
+            flyctl redis create \
+              --name "${{ env.fly_app_name }}-redis" \
+              -o "${{ env.fly_org }}" \
+              --region "${{ env.fly_app_region }}" \
+              --no-replicas \
+              --plan pay-as-you-go
           fi
 
-          cd redis
-          sed -i "s/%fly_app_name%/${{ env.fly_app_name }}/g" fly.toml
-          sed -i "s/%fly_redis_password%/${{ env.fly_redis_password }}/g" fly.toml
-          flyctl deploy
-          cd ..
+          # Parse the private Redis URL into parts Nextcloud expects
+          REDIS_URL=$(flyctl redis status "${{ env.fly_app_name }}-redis" --json | jq -r '.PrivateURL')
+          REDIS_HOST=$(echo $REDIS_URL | sed -E 's|redis://:.*@(.*):[0-9]+|\1|')
+          REDIS_PORT=$(echo $REDIS_URL | sed -E 's|redis://.*:([0-9]+)$|\1|')
+          REDIS_PASSWORD=$(echo $REDIS_URL | sed -E 's|redis://:(.*)@.*|\1|')
+
+          echo "REDIS_HOST=$REDIS_HOST"         >> $GITHUB_ENV
+          echo "REDIS_PORT=$REDIS_PORT"         >> $GITHUB_ENV
+          echo "REDIS_PASSWORD=$REDIS_PASSWORD" >> $GITHUB_ENV
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
+      # ----------------------------------------------------------------
+      # NEXTCLOUD APP
+      # ----------------------------------------------------------------
       - name: Deploy Nextcloud App
         run: |
-          if [ -z "$(flyctl apps list | grep '${{ env.fly_app_name }}[^-]')" ]; then
-              flyctl launch --name ${{ env.fly_app_name }} \
-                         --no-deploy \
-                         --org ${{ env.fly_org }} \
-                         --region ${{ env.fly_app_region }}
+          # Create the app if it doesn't exist yet
+          if ! flyctl apps list | grep -q "^${{ env.fly_app_name }} "; then
+            flyctl launch \
+              --name "${{ env.fly_app_name }}" \
+              --no-deploy \
+              -o "${{ env.fly_org }}" \
+              --region "${{ env.fly_app_region }}" \
+              --yes
 
-              flyctl scale memory 1024
+            flyctl scale memory 1024 \
+              --app "${{ env.fly_app_name }}"
 
-              flyctl volumes create nextcloud_data \
-                 --size 1 \
-                 --region ${{ env.fly_app_region }} \
-                 --app ${{ env.fly_app_name }} \
-                 --yes
+            flyctl volumes create nextcloud_data \
+              --size 1 \
+              --region "${{ env.fly_app_region }}" \
+              --app "${{ env.fly_app_name }}" \
+              --yes
 
-              rm fly.toml
+            rm -f fly.toml
           fi
 
+          # Substitute placeholders in fly.toml
           cd nextcloud
-          sed -i "s/%fly_app_name%/${{ env.fly_app_name }}/g" fly.toml
-          sed -i "s/%fly_redis_password%/${{ env.fly_redis_password }}/g" fly.toml
-          sed -i "s/%fly_db_password%/${{ env.fly_db_password }}/g" fly.toml
-          sed -i "s/%s3_bucket_name%/${{ env.s3_bucket_name }}/g" fly.toml
-          sed -i "s/%s3_access_key%/${{ env.s3_access_key }}/g" fly.toml
-          sed -i "s/%s3_secret_key%/${{ env.s3_secret_key }}/g" fly.toml
-          sed -i "s/%s3_endpoint%/${{ env.s3_endpoint }}/g" fly.toml
-          flyctl deploy
+          sed -i "s|%fly_app_name%|${{ env.fly_app_name }}|g"     fly.toml
+          sed -i "s|%fly_app_region%|${{ env.fly_app_region }}|g"  fly.toml
+          sed -i "s|%redis_host%|${{ env.REDIS_HOST }}|g"          fly.toml
+          sed -i "s|%redis_port%|${{ env.REDIS_PORT }}|g"          fly.toml
+          sed -i "s|%redis_password%|${{ env.REDIS_PASSWORD }}|g"  fly.toml
+          sed -i "s|%s3_bucket_name%|${{ env.s3_bucket_name }}|g"  fly.toml
+          sed -i "s|%s3_access_key%|${{ env.s3_access_key }}|g"    fly.toml
+          sed -i "s|%s3_secret_key%|${{ env.s3_secret_key }}|g"    fly.toml
+          sed -i "s|%s3_endpoint%|${{ env.s3_endpoint }}|g"        fly.toml
+
+          flyctl deploy \
+            --app "${{ env.fly_app_name }}" \
+            --yes
           cd ..
+
+          # Attach MPG to the Nextcloud app — sets DATABASE_URL secret automatically
+          CLUSTER_ID=$(flyctl mpg list -o "${{ env.fly_org }}" --json | jq -r '.[] | select(.Name=="${{ env.fly_app_name }}-db") | .ID')
+          if ! flyctl secrets list --app "${{ env.fly_app_name }}" | grep -q "DATABASE_URL"; then
+            flyctl mpg attach "$CLUSTER_ID" \
+              --app "${{ env.fly_app_name }}"
+          fi
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
