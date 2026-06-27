@@ -82,16 +82,9 @@ jobs:
         run: |
           if ! flyctl apps list | grep -q "^${{ env.fly_app_name }} "; then
 
-            cd nextcloud
-
-            flyctl launch \
-              --name "${{ env.fly_app_name }}" \
-              --no-deploy \
-              -o "${{ env.fly_org }}" \
-              --region "${{ env.fly_app_region }}" \
-              --yes
-
-            cd ..
+            # Create the app without touching fly.toml at all
+            flyctl apps create "${{ env.fly_app_name }}" \
+              -o "${{ env.fly_org }}"
 
             flyctl scale memory 1024 \
               --app "${{ env.fly_app_name }}"
@@ -113,7 +106,7 @@ jobs:
 
           cd nextcloud
 
-          # Restore our fly.toml template from git (overwrite whatever flyctl generated)
+          # Restore our fly.toml template from git
           git checkout fly.toml
 
           # Substitute all placeholders
