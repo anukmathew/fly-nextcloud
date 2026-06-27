@@ -56,20 +56,8 @@ jobs:
       # --disable-eviction: safer for Nextcloud file locking & sessions.
       # ~$0.10–$2.00/mo for a small team on pay-as-you-go.
       # ----------------------------------------------------------------
-      - name: Deploy & Check Redis
+      - name: Get Redis Connection Details
         run: |
-          if flyctl redis list -o "${{ env.fly_org }}" | grep -q "${{ env.fly_app_name }}-redis"; then
-            echo "Redis already exists, fetching connection details."
-          else
-            echo "N" | flyctl redis create \
-              --name "${{ env.fly_app_name }}-redis" \
-              -o "${{ env.fly_org }}" \
-              --region "${{ env.fly_app_region }}" \
-              --no-replicas \
-              --disable-eviction
-          fi
-
-          # Parse private Redis URL — Upstash format: redis://PASSWORD@HOST
           REDIS_URL=$(flyctl redis status "${{ env.fly_app_name }}-redis" --json | jq -r '.PrivateURL')
           REDIS_HOST=$(echo $REDIS_URL | sed -E 's|redis://.*@(.*)|\1|')
           REDIS_PORT="6379"
