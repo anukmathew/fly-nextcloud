@@ -4,11 +4,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     sudo \
     ffmpeg \
-    libmagickcore-6.q16-6-extra || \
-    apt-get install -y --no-install-recommends \
-    sudo \
-    ffmpeg \
-    libmagickcore-6.q16-7-extra && \
+    libmagickcore-7.q16-10-extra && \
     rm -rf /var/lib/apt/lists/*
 
 COPY new_entrypoint.sh /new_entrypoint.sh
