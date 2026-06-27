@@ -61,10 +61,14 @@ jobs:
       # ----------------------------------------------------------------
       - name: Deploy Nextcloud App
         run: |
+          # Create app only if it doesn't exist
           if ! flyctl apps list | grep -q "^${{ secrets.FLY_APP_NAME }} "; then
             flyctl apps create "${{ secrets.FLY_APP_NAME }}" \
               -o "${{ secrets.FLY_ORG }}"
+          fi
 
+          # Create volume only if it doesn't exist
+          if ! flyctl volumes list --app "${{ secrets.FLY_APP_NAME }}" | grep -q "nextcloud_data"; then
             flyctl volumes create nextcloud_data \
               --size 1 \
               --region "${{ secrets.FLY_APP_REGION }}" \
@@ -72,12 +76,13 @@ jobs:
               --yes
           fi
 
-          # Attach Postgres — sets DATABASE_URL secret automatically
+          # Attach Postgres only if DATABASE_URL not already set
           if ! flyctl secrets list --app "${{ secrets.FLY_APP_NAME }}" | grep -q "DATABASE_URL"; then
             flyctl pg attach "${{ secrets.FLY_APP_NAME }}-db" \
               --app "${{ secrets.FLY_APP_NAME }}" \
               --database-name nextcloud \
-              --database-user nextcloud
+              --database-user nextcloud \
+              --yes
           fi
 
           cd nextcloud
