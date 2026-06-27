@@ -2,20 +2,11 @@ name: Maintain Fly-Nextcloud
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 2 * * *'  # daily at 2am
+    - cron: '0 2 * * *'
 
 jobs:
   maintain:
     runs-on: ubuntu-latest
-
-    env:
-      fly_org: ${{ secrets.FLY_ORG }}
-      fly_app_name: ${{ secrets.FLY_APP_NAME }}
-      fly_app_region: ${{ secrets.FLY_APP_REGION }}
-      s3_bucket_name: ${{ secrets.S3_BUCKET_NAME }}
-      s3_endpoint: ${{ secrets.S3_ENDPOINT }}
-      s3_access_key: ${{ secrets.S3_ACCESS_KEY }}
-      s3_secret_key: ${{ secrets.S3_SECRET_KEY }}
 
     steps:
       - name: Checkout
@@ -26,35 +17,37 @@ jobs:
 
       # ----------------------------------------------------------------
       # POSTGRES BACKUP
-      # Dumps the nextcloud database and uploads to R2 as a daily backup.
-      # Keeps last 30 days of backups.
+      # Dumps the nextcloud DB and uploads to R2.
+      # Keeps last 30 days of backups automatically.
       # ----------------------------------------------------------------
       - name: Backup Postgres to R2
         run: |
           DATE=$(date +%Y-%m-%d)
           BACKUP_FILE="backup-$DATE.sql"
 
-          # Dump the nextcloud database via flyctl ssh
+          echo "📦 Dumping Postgres database..."
           flyctl ssh console \
-            --app "${{ env.fly_app_name }}-db" \
+            --app "${{ secrets.FLY_APP_NAME }}-db" \
             --command "pg_dump -U postgres nextcloud" > "$BACKUP_FILE"
 
-          # Upload backup to R2 using aws cli (s3-compatible)
+          echo "⬆️  Uploading to R2..."
           aws s3 cp "$BACKUP_FILE" \
-            "s3://${{ env.s3_bucket_name }}/postgres-backups/$BACKUP_FILE" \
-            --endpoint-url "https://${{ env.s3_endpoint }}"
+            "s3://${{ secrets.S3_BUCKET_NAME }}/postgres-backups/$BACKUP_FILE" \
+            --endpoint-url "https://${{ secrets.S3_ENDPOINT }}"
 
           echo "✅ Backup uploaded: postgres-backups/$BACKUP_FILE"
 
-          # Delete backups older than 30 days from R2
-          aws s3 ls "s3://${{ env.s3_bucket_name }}/postgres-backups/" | \
+          # Delete backups older than 30 days
+          echo "🗑️  Cleaning up old backups..."
+          aws s3 ls "s3://${{ secrets.S3_BUCKET_NAME }}/postgres-backups/" | \
           while read -r line; do
             BACKUP_DATE=$(echo "$line" | awk '{print $1}')
             BACKUP_NAME=$(echo "$line" | awk '{print $4}')
-            if [[ $(date -d "$BACKUP_DATE" +%s) -lt $(date -d "30 days ago" +%s) ]]; then
-              aws s3 rm "s3://${{ env.s3_bucket_name }}/postgres-backups/$BACKUP_NAME" \
-                --endpoint-url "https://${{ env.s3_endpoint }}"
-              echo "🗑️ Deleted old backup: $BACKUP_NAME"
+            if [ -n "$BACKUP_NAME" ] && \
+               [[ $(date -d "$BACKUP_DATE" +%s 2>/dev/null) -lt $(date -d "30 days ago" +%s) ]]; then
+              aws s3 rm "s3://${{ secrets.S3_BUCKET_NAME }}/postgres-backups/$BACKUP_NAME" \
+                --endpoint-url "https://${{ secrets.S3_ENDPOINT }}"
+              echo "🗑️  Deleted: $BACKUP_NAME"
             fi
           done
         env:
@@ -65,35 +58,36 @@ jobs:
 
       # ----------------------------------------------------------------
       # POSTGRES VOLUME AUTO-RESIZE
-      # If DB is >90% of volume size, expand by 1GB.
-      # Uses flyctl volumes instead of the old manual scale dance.
+      # Extends volume if DB is using >90% of allocated space.
+      # Uses flyctl volumes extend (modern single command, no scale dance)
       # ----------------------------------------------------------------
       - name: Check & Resize Postgres Volume
         run: |
-          # Get current volume info
           VOL_ID=$(flyctl volumes list \
-            --app "${{ env.fly_app_name }}-db" \
+            --app "${{ secrets.FLY_APP_NAME }}-db" \
             --json | jq -r '.[0].id')
 
           VOL_SIZE_GB=$(flyctl volumes list \
-            --app "${{ env.fly_app_name }}-db" \
+            --app "${{ secrets.FLY_APP_NAME }}-db" \
             --json | jq -r '.[0].size_gb')
 
-          # Get DB size in bytes from Fly Prometheus
-          DB_SIZE_BYTES=$(curl -s \
-            "https://api.fly.io/prometheus/${{ env.fly_org }}/api/v1/query" \
-            --data-urlencode "query=pg_database_size_bytes{app=\"${{ env.fly_app_name }}-db\"}" \
+          DB_SIZE_BYTES=$(curl -sf \
+            "https://api.fly.io/prometheus/${{ secrets.FLY_ORG }}/api/v1/query" \
+            --data-urlencode "query=pg_database_size_bytes{app=\"${{ secrets.FLY_APP_NAME }}-db\"}" \
             --data-urlencode "time=$(date +%s)" \
             -H "Authorization: Bearer ${{ secrets.FLY_API_TOKEN }}" \
-            | jq -r '.data.result[] | select(.metric.datname == "nextcloud") | .value[1]')
+            | jq -r '.data.result[] | select(.metric.datname == "nextcloud") | .value[1]' 2>/dev/null || echo "0")
 
-          # Convert bytes to GB
+          if [ "$DB_SIZE_BYTES" = "0" ] || [ -z "$DB_SIZE_BYTES" ]; then
+            echo "⚠️  Could not fetch DB size from Prometheus, skipping resize check."
+            exit 0
+          fi
+
           DB_SIZE_GB=$(awk "BEGIN { printf \"%.2f\", $DB_SIZE_BYTES/1073741824 }")
 
-          echo "Volume size: ${VOL_SIZE_GB}GB"
-          echo "Database size: ${DB_SIZE_GB}GB"
+          echo "📊 Volume size: ${VOL_SIZE_GB}GB"
+          echo "📊 Database size: ${DB_SIZE_GB}GB"
 
-          # If DB > 90% of volume, extend the volume by 1GB
           NEEDS_RESIZE=$(awk \
             -v db="$DB_SIZE_GB" \
             -v vol="$VOL_SIZE_GB" \
@@ -101,36 +95,33 @@ jobs:
 
           if [ "$NEEDS_RESIZE" = "yes" ]; then
             NEW_SIZE=$((VOL_SIZE_GB + 1))
-            echo "⚠️ DB at >90% capacity. Extending volume to ${NEW_SIZE}GB..."
-
-            flyctl volumes extend "$VOL_ID" \
-              --size "$NEW_SIZE"
-
+            echo "⚠️  DB at >90% — extending volume to ${NEW_SIZE}GB..."
+            flyctl volumes extend "$VOL_ID" --size "$NEW_SIZE"
             echo "✅ Volume extended to ${NEW_SIZE}GB"
           else
-            echo "✅ Volume has sufficient space. No resize needed."
+            echo "✅ Volume has sufficient space."
           fi
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
       # ----------------------------------------------------------------
-      # S3 CLEANUP
+      # R2 CLEANUP
       # Removes incomplete/aborted multipart uploads from R2.
-      # These accumulate over time and waste storage.
+      # These accumulate over time and waste storage quota.
       # ----------------------------------------------------------------
       - name: Cleanup Aborted Uploads from R2
         run: |
-          curl https://rclone.org/install.sh | sudo bash
+          curl -fsSL https://rclone.org/install.sh | sudo bash
 
-          mkdir -p $HOME/.config/rclone
-          cat > $HOME/.config/rclone/rclone.conf << RCLONE
-          [r2]
-          type = s3
-          provider = Cloudflare
-          endpoint = https://${{ env.s3_endpoint }}
-          access_key_id = ${{ env.s3_access_key }}
-          secret_access_key = ${{ env.s3_secret_key }}
-          RCLONE
+          mkdir -p "$HOME/.config/rclone"
+          cat > "$HOME/.config/rclone/rclone.conf" << RCLONE
+[r2]
+type = s3
+provider = Cloudflare
+endpoint = https://${{ secrets.S3_ENDPOINT }}
+access_key_id = ${{ secrets.S3_ACCESS_KEY }}
+secret_access_key = ${{ secrets.S3_SECRET_KEY }}
+RCLONE
 
-          rclone cleanup r2:${{ env.s3_bucket_name }}
+          rclone cleanup r2:${{ secrets.S3_BUCKET_NAME }}
           echo "✅ Cleaned up aborted multipart uploads from R2"
