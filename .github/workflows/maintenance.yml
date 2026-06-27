@@ -25,10 +25,26 @@ jobs:
           DATE=$(date +%Y-%m-%d)
           BACKUP_FILE="backup-$DATE.sql"
 
+          echo "📦 Installing PostgreSQL client..."
+          sudo apt-get install -y postgresql-client
+
+          echo "🔌 Starting Postgres proxy..."
+          flyctl proxy 5432:5432 \
+            --app "${{ secrets.FLY_APP_NAME }}-db" &
+          PROXY_PID=$!
+
+          # Wait for proxy to be ready
+          sleep 5
+
           echo "📦 Dumping Postgres database..."
-          flyctl ssh console \
-            --app "${{ secrets.FLY_APP_NAME }}-db" \
-            --command "pg_dump \$DATABASE_URL" > "$BACKUP_FILE"
+          PGPASSWORD="${{ secrets.FLY_DB_PASSWORD }}" pg_dump \
+            -h localhost \
+            -p 5432 \
+            -U postgres \
+            -d nextcloud > "$BACKUP_FILE"
+
+          # Kill proxy
+          kill $PROXY_PID
 
           echo "⬆️  Uploading to R2..."
           aws s3 cp "$BACKUP_FILE" \
@@ -38,7 +54,6 @@ jobs:
           echo "✅ Backup uploaded: postgres-backups/$BACKUP_FILE"
 
           # Delete backups older than 30 days
-          echo "🗑️  Cleaning up old backups..."
           aws s3 ls "s3://${{ secrets.S3_BUCKET_NAME }}/postgres-backups/" | \
           while read -r line; do
             BACKUP_DATE=$(echo "$line" | awk '{print $1}')
