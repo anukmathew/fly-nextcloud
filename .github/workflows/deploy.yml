@@ -54,7 +54,8 @@ jobs:
               flyctl volumes create redis_data \
                  --size 1 \
                  --region ${{ env.fly_app_region }} \
-                 --app ${{ env.fly_app_name }}-redis
+                 --app ${{ env.fly_app_name }}-redis \
+                 --yes
 
               rm fly.toml
           fi
@@ -80,7 +81,8 @@ jobs:
               flyctl volumes create nextcloud_data \
                  --size 1 \
                  --region ${{ env.fly_app_region }} \
-                 --app ${{ env.fly_app_name }}
+                 --app ${{ env.fly_app_name }} \
+                 --yes
 
               rm fly.toml
           fi
