@@ -1,5 +1,11 @@
 #!/bin/sh
 
+# Fix data directory permissions
+# The volume is mounted as root, Nextcloud needs www-data to own it
+mkdir -p /var/www/html/data
+chown -R www-data:www-data /var/www/html/data
+chmod 750 /var/www/html/data
+
 # ---------------------------------------------------------------
 # Security hardening — Apache headers
 # Sets HSTS, removes server version, adds __Host cookie support
