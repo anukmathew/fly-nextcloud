@@ -26,9 +26,9 @@ jobs:
           BACKUP_FILE="backup-$DATE.sql"
 
           echo "📦 Dumping Postgres database..."
-          flyctl pg connect \
+          flyctl ssh console \
             --app "${{ secrets.FLY_APP_NAME }}-db" \
-            --command "pg_dump -U postgres nextcloud" > "$BACKUP_FILE"
+            --command "pg_dump \$DATABASE_URL" > "$BACKUP_FILE"
 
           echo "⬆️  Uploading to R2..."
           aws s3 cp "$BACKUP_FILE" \
