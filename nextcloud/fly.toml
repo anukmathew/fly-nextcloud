@@ -8,17 +8,30 @@ kill_timeout   = "5s"
 
 [env]
   PHP_MEMORY_LIMIT = "512M"
-  NEXTCLOUD_LOGGING_BACKEND = "errorlog"
+
+  # ---------------------------------------------------------------
+  # Security hardening
+  # ---------------------------------------------------------------
+  NEXTCLOUD_TRUSTED_DOMAINS  = "%fly_app_name%.fly.dev"
+  OVERWRITEPROTOCOL          = "https"
+  OVERWRITEHOST              = "%fly_app_name%.fly.dev"
+  OVERWRITE_CLI_URL          = "https://%fly_app_name%.fly.dev"
+
+  # Send logs to fly.io log stream instead of disk
+  # This prevents logs from filling the volume
+  NEXTCLOUD_LOGGING_BACKEND  = "errorlog"
+
+  # Maintenance window at 2am UTC (matches maintenance.yml schedule)
+  MAINTENANCE_WINDOW_START   = "2"
+
+  # Default phone region
+  NC_DEFAULT_PHONE_REGION    = "US"
 
   # ---------------------------------------------------------------
   # Redis — Upstash managed via fly redis create
-  #
   # REDIS_HOST must be hostname ONLY — no port, no protocol
-  # The port is set separately via REDIS_HOST_PORT
-  # The password must be the raw password — no "default:" prefix
-  #
-  # Upstash private URL format: redis://PASSWORD@fly-NAME.upstash.io
-  # This only resolves inside fly.io's private network (correct)
+  # REDIS_TIMEOUT = 0.0 enables persistent connections (prevents
+  # "Redis server went away" errors with Upstash)
   # ---------------------------------------------------------------
   REDIS_HOST          = "%redis_host%"
   REDIS_HOST_PORT     = "%redis_port%"
@@ -29,11 +42,8 @@ kill_timeout   = "5s"
   # ---------------------------------------------------------------
   # Postgres
   # DATABASE_URL is set automatically by fly pg attach as a secret.
-  # Nextcloud Docker image also reads individual POSTGRES_* vars
-  # for the initial setup wizard on first boot.
-  # POSTGRES_PASSWORD must match what fly pg attach actually set —
-  # this is extracted from DATABASE_URL in deploy.yml, NOT from
-  # the FLY_DB_PASSWORD secret (which was only for pg create).
+  # POSTGRES_PASSWORD is extracted from DATABASE_URL in deploy.yml
+  # NOT from FLY_DB_PASSWORD (which is only used for pg create)
   # ---------------------------------------------------------------
   POSTGRES_DB       = "nextcloud"
   POSTGRES_USER     = "nextcloud"
@@ -56,9 +66,14 @@ kill_timeout   = "5s"
   OBJECTSTORE_S3_SECRET         = "%s3_secret_key%"
   OBJECTSTORE_S3_HOST           = "%s3_endpoint%"
 
+# ---------------------------------------------------------------
+# Mount only the data directory — NOT the full app
+# This keeps the volume small (user data only)
+# App files live in the container and refresh on every deploy
+# ---------------------------------------------------------------
 [[mounts]]
   source      = "nextcloud_data"
-  destination = "/var/www/html"
+  destination = "/var/www/html/data"
 
 [http_service]
   internal_port        = 80
@@ -66,6 +81,15 @@ kill_timeout   = "5s"
   auto_stop_machines   = false
   auto_start_machines  = true
   min_machines_running = 1
+
+  # Security headers
+  [[http_service.checks]]
+    grace_period  = "10s"
+    interval      = "30s"
+    method        = "GET"
+    path          = "/status.php"
+    protocol      = "http"
+    timeout       = "5s"
 
   [http_service.concurrency]
     type       = "connections"
