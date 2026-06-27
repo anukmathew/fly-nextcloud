@@ -61,7 +61,7 @@ jobs:
           if flyctl redis list -o "${{ env.fly_org }}" | grep -q "${{ env.fly_app_name }}-redis"; then
             echo "Redis already exists, fetching connection details."
           else
-            flyctl redis create \
+            echo "N" | flyctl redis create \
               --name "${{ env.fly_app_name }}-redis" \
               -o "${{ env.fly_org }}" \
               --region "${{ env.fly_app_region }}" \
@@ -69,11 +69,11 @@ jobs:
               --disable-eviction
           fi
 
-          # Parse private Redis URL into parts Nextcloud expects
+          # Parse private Redis URL — Upstash format: redis://PASSWORD@HOST
           REDIS_URL=$(flyctl redis status "${{ env.fly_app_name }}-redis" --json | jq -r '.PrivateURL')
-          REDIS_HOST=$(echo $REDIS_URL | sed -E 's|redis://:.*@(.*):[0-9]+|\1|')
-          REDIS_PORT=$(echo $REDIS_URL | sed -E 's|redis://.*:([0-9]+)$|\1|')
-          REDIS_PASSWORD=$(echo $REDIS_URL | sed -E 's|redis://:(.*)@.*|\1|')
+          REDIS_HOST=$(echo $REDIS_URL | sed -E 's|redis://.*@(.*)|\1|')
+          REDIS_PORT="6379"
+          REDIS_PASSWORD=$(echo $REDIS_URL | sed -E 's|redis://(.*)@.*|\1|')
 
           echo "REDIS_HOST=$REDIS_HOST"         >> $GITHUB_ENV
           echo "REDIS_PORT=$REDIS_PORT"         >> $GITHUB_ENV
