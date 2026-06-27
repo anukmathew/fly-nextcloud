@@ -106,7 +106,7 @@ jobs:
             --config fly.toml \
             --app "${{ secrets.FLY_APP_NAME }}" \
             --ha=false \
-            --remote-only \
+            --local-only \
             --yes
           cd ..
         env:
