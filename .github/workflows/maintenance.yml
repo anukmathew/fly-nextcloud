@@ -113,15 +113,11 @@ jobs:
         run: |
           curl -fsSL https://rclone.org/install.sh | sudo bash
 
-          mkdir -p "$HOME/.config/rclone"
-          cat > "$HOME/.config/rclone/rclone.conf" << RCLONE
-[r2]
-type = s3
-provider = Cloudflare
-endpoint = https://${{ secrets.S3_ENDPOINT }}
-access_key_id = ${{ secrets.S3_ACCESS_KEY }}
-secret_access_key = ${{ secrets.S3_SECRET_KEY }}
-RCLONE
+          rclone cleanup \
+            --s3-provider Cloudflare \
+            --s3-endpoint "https://${{ secrets.S3_ENDPOINT }}" \
+            --s3-access-key-id "${{ secrets.S3_ACCESS_KEY }}" \
+            --s3-secret-access-key "${{ secrets.S3_SECRET_KEY }}" \
+            :s3:${{ secrets.S3_BUCKET_NAME }}
 
-          rclone cleanup r2:${{ secrets.S3_BUCKET_NAME }}
-          echo "✅ Cleaned up aborted multipart uploads from R2"
+          echo "✅ Cleaned up aborted multipart uploads from R2""
