@@ -20,12 +20,14 @@ jobs:
 
       # ----------------------------------------------------------------
       # POSTGRES
+      # Uses flyctl status to check existence (reliable, exit code based)
       # ----------------------------------------------------------------
       - name: Deploy & Check Postgres
         run: |
-          if flyctl apps list | grep -q "${{ secrets.FLY_APP_NAME }}-db"; then
-            echo "Postgres already exists, skipping."
+          if flyctl status --app "${{ secrets.FLY_APP_NAME }}-db" > /dev/null 2>&1; then
+            echo "✅ Postgres already exists, skipping."
           else
+            echo "🚀 Creating Postgres cluster..."
             flyctl pg create \
               --name "${{ secrets.FLY_APP_NAME }}-db" \
               -o "${{ secrets.FLY_ORG }}" \
@@ -39,36 +41,58 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
       # ----------------------------------------------------------------
-      # REDIS — fetch connection details from existing Upstash instance
+      # REDIS
+      # Manually created via flyctl redis create (interactive, done once)
+      # Here we just fetch the private URL and parse it correctly.
+      #
+      # Upstash private URL format: redis://PASSWORD@fly-NAME.upstash.io
+      # Note: NO port in the URL — port is always 6379
+      # Note: NO "default:" prefix in password in private URLs
       # ----------------------------------------------------------------
       - name: Get Redis Connection Details
         run: |
-          REDIS_URL=$(flyctl redis status "${{ secrets.FLY_APP_NAME }}-redis" | grep "Private URL" | awk '{print $4}')
+          RAW=$(flyctl redis status "${{ secrets.FLY_APP_NAME }}-redis" | grep "Private URL")
+          REDIS_URL=$(echo "$RAW" | awk '{print $NF}' | tr -d '[:space:]')
 
-          # URL format: redis://default:PASSWORD@HOST
-          REDIS_HOST=$(echo $REDIS_URL | sed -E 's|redis://.*@(.*)|\1|')
+          # Parse hostname only (no port)
+          REDIS_HOST=$(echo "$REDIS_URL" | sed -E 's|redis://[^@]+@([^:/]+).*|\1|')
           REDIS_PORT="6379"
-          REDIS_PASSWORD=$(echo $REDIS_URL | sed -E 's|redis://default:(.*)@.*|\1|')
+          # Parse password only (strip "default:" prefix if present)
+          REDIS_PASS_RAW=$(echo "$REDIS_URL" | sed -E 's|redis://([^@]+)@.*|\1|')
+          REDIS_PASSWORD=$(echo "$REDIS_PASS_RAW" | sed -E 's|^default:||')
 
           echo "REDIS_HOST=$REDIS_HOST"         >> $GITHUB_ENV
           echo "REDIS_PORT=$REDIS_PORT"         >> $GITHUB_ENV
           echo "REDIS_PASSWORD=$REDIS_PASSWORD" >> $GITHUB_ENV
+
+          echo "✅ Redis host: $REDIS_HOST"
+          echo "✅ Redis port: $REDIS_PORT"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
       # ----------------------------------------------------------------
       # NEXTCLOUD APP
+      # - Uses flyctl status for reliable existence check
+      # - Attaches Postgres and extracts real password from DATABASE_URL
+      #   (fly pg attach sets its own password, not FLY_DB_PASSWORD)
+      # - Redis host is hostname only — port set separately in fly.toml
       # ----------------------------------------------------------------
       - name: Deploy Nextcloud App
         run: |
-          # Create app only if it doesn't exist
-          if ! flyctl apps list | grep -q "^${{ secrets.FLY_APP_NAME }} "; then
+          # Create app if it doesn't exist
+          if flyctl status --app "${{ secrets.FLY_APP_NAME }}" > /dev/null 2>&1; then
+            echo "✅ App already exists, skipping creation."
+          else
+            echo "🚀 Creating app..."
             flyctl apps create "${{ secrets.FLY_APP_NAME }}" \
               -o "${{ secrets.FLY_ORG }}"
           fi
 
-          # Create volume only if it doesn't exist
-          if ! flyctl volumes list --app "${{ secrets.FLY_APP_NAME }}" | grep -q "nextcloud_data"; then
+          # Create volume if it doesn't exist
+          if flyctl volumes list --app "${{ secrets.FLY_APP_NAME }}" 2>/dev/null | grep -q "nextcloud_data"; then
+            echo "✅ Volume already exists, skipping."
+          else
+            echo "🚀 Creating volume..."
             flyctl volumes create nextcloud_data \
               --size 1 \
               --region "${{ secrets.FLY_APP_REGION }}" \
@@ -76,8 +100,11 @@ jobs:
               --yes
           fi
 
-          # Attach Postgres only if DATABASE_URL not already set
-          if ! flyctl secrets list --app "${{ secrets.FLY_APP_NAME }}" | grep -q "DATABASE_URL"; then
+          # Attach Postgres if DATABASE_URL not already set
+          if flyctl secrets list --app "${{ secrets.FLY_APP_NAME }}" | grep -q "DATABASE_URL"; then
+            echo "✅ Postgres already attached."
+          else
+            echo "🚀 Attaching Postgres..."
             flyctl pg attach "${{ secrets.FLY_APP_NAME }}-db" \
               --app "${{ secrets.FLY_APP_NAME }}" \
               --database-name nextcloud \
@@ -85,22 +112,36 @@ jobs:
               --yes
           fi
 
-          cd nextcloud
+          # Extract real Postgres password from DATABASE_URL inside the app
+          # fly pg attach sets its own random password — not FLY_DB_PASSWORD
+          # DATABASE_URL format: postgres://USER:PASSWORD@HOST:PORT/DBNAME
+          POSTGRES_PASSWORD=$(flyctl ssh console \
+            --app "${{ secrets.FLY_APP_NAME }}" \
+            --command "printenv DATABASE_URL" 2>/dev/null \
+            | tr -d '\r\n' \
+            | sed -E 's|postgres://[^:]+:([^@]+)@.*|\1|')
 
-          # Restore our fly.toml template from git
+          if [ -z "$POSTGRES_PASSWORD" ]; then
+            echo "⚠️  Could not extract password from DATABASE_URL, using FLY_DB_PASSWORD as fallback"
+            POSTGRES_PASSWORD="${{ secrets.FLY_DB_PASSWORD }}"
+          else
+            echo "✅ Extracted real Postgres password from DATABASE_URL"
+          fi
+
+          # Substitute all placeholders in fly.toml
+          cd nextcloud
           git checkout fly.toml
 
-          # Substitute all placeholders
-          sed -i "s|%fly_app_name%|${{ secrets.FLY_APP_NAME }}|g"      fly.toml
-          sed -i "s|%fly_app_region%|${{ secrets.FLY_APP_REGION }}|g"  fly.toml
-          sed -i "s|%redis_host%|${{ env.REDIS_HOST }}|g"               fly.toml
-          sed -i "s|%redis_port%|${{ env.REDIS_PORT }}|g"               fly.toml
-          sed -i "s|%redis_password%|${{ env.REDIS_PASSWORD }}|g"       fly.toml
-          sed -i "s|%fly_db_password%|${{ secrets.FLY_DB_PASSWORD }}|g" fly.toml
-          sed -i "s|%s3_bucket_name%|${{ secrets.S3_BUCKET_NAME }}|g"  fly.toml
-          sed -i "s|%s3_access_key%|${{ secrets.S3_ACCESS_KEY }}|g"    fly.toml
-          sed -i "s|%s3_secret_key%|${{ secrets.S3_SECRET_KEY }}|g"    fly.toml
-          sed -i "s|%s3_endpoint%|${{ secrets.S3_ENDPOINT }}|g"        fly.toml
+          sed -i "s|%fly_app_name%|${{ secrets.FLY_APP_NAME }}|g"       fly.toml
+          sed -i "s|%fly_app_region%|${{ secrets.FLY_APP_REGION }}|g"   fly.toml
+          sed -i "s|%redis_host%|${{ env.REDIS_HOST }}|g"                fly.toml
+          sed -i "s|%redis_port%|${{ env.REDIS_PORT }}|g"                fly.toml
+          sed -i "s|%redis_password%|${{ env.REDIS_PASSWORD }}|g"        fly.toml
+          sed -i "s|%postgres_password%|${POSTGRES_PASSWORD}|g"          fly.toml
+          sed -i "s|%s3_bucket_name%|${{ secrets.S3_BUCKET_NAME }}|g"   fly.toml
+          sed -i "s|%s3_access_key%|${{ secrets.S3_ACCESS_KEY }}|g"     fly.toml
+          sed -i "s|%s3_secret_key%|${{ secrets.S3_SECRET_KEY }}|g"     fly.toml
+          sed -i "s|%s3_endpoint%|${{ secrets.S3_ENDPOINT }}|g"         fly.toml
 
           flyctl deploy \
             --config fly.toml \
