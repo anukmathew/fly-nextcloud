@@ -13,6 +13,8 @@ kill_timeout   = "5s"
   REDIS_HOST          = "%redis_host%"
   REDIS_HOST_PORT     = "%redis_port%"
   REDIS_HOST_PASSWORD = "%redis_password%"
+  REDIS_TIMEOUT       = "0.0"
+  REDIS_DB_INDEX      = "0"
 
   # Postgres — DATABASE_URL set automatically by fly pg attach
   # Nextcloud Docker image also reads these individual vars on first boot
@@ -30,6 +32,7 @@ kill_timeout   = "5s"
   OBJECTSTORE_S3_KEY            = "%s3_access_key%"
   OBJECTSTORE_S3_SECRET         = "%s3_secret_key%"
   OBJECTSTORE_S3_HOST           = "%s3_endpoint%"
+  OBJECTSTORE_S3_REGION        = "auto"
 
 [[mounts]]
   source      = "nextcloud_data"
