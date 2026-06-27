@@ -57,7 +57,8 @@ jobs:
           echo "✅ Backup uploaded: postgres-backups/$BACKUP_FILE"
 
           # Delete backups older than 30 days
-          aws s3 ls "s3://${{ secrets.S3_BUCKET_NAME }}/postgres-backups/" | \
+          aws s3 ls "s3://${{ secrets.S3_BUCKET_NAME }}/postgres-backups/" \
+            --endpoint-url "https://${{ secrets.S3_ENDPOINT }}" | \
           while read -r line; do
             BACKUP_DATE=$(echo "$line" | awk '{print $1}')
             BACKUP_NAME=$(echo "$line" | awk '{print $4}')
@@ -131,11 +132,15 @@ jobs:
         run: |
           curl -fsSL https://rclone.org/install.sh | sudo bash
 
-          rclone cleanup \
-            --s3-provider Cloudflare \
-            --s3-endpoint "https://${{ secrets.S3_ENDPOINT }}" \
-            --s3-access-key-id "${{ secrets.S3_ACCESS_KEY }}" \
-            --s3-secret-access-key "${{ secrets.S3_SECRET_KEY }}" \
-            :s3:${{ secrets.S3_BUCKET_NAME }}
+          mkdir -p "$HOME/.config/rclone"
+          printf '[r2]\ntype = s3\nprovider = Cloudflare\nendpoint = https://%s\naccess_key_id = %s\nsecret_access_key = %s\n' \
+            "$S3_ENDPOINT" \
+            "$S3_ACCESS_KEY" \
+            "$S3_SECRET_KEY" > "$HOME/.config/rclone/rclone.conf"
 
-          echo "✅ Cleaned up aborted multipart uploads from R2""
+          rclone cleanup r2:${{ secrets.S3_BUCKET_NAME }}
+          echo "✅ Cleaned up aborted multipart uploads from R2"
+        env:
+          S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
+          S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}
+          S3_SECRET_KEY: ${{ secrets.S3_SECRET_KEY }}
