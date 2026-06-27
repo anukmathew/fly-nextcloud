@@ -81,12 +81,18 @@ jobs:
       - name: Deploy Nextcloud App
         run: |
           if ! flyctl apps list | grep -q "^${{ env.fly_app_name }} "; then
+
+            # Run launch from inside nextcloud/ where the Dockerfile lives
+            cd nextcloud
+
             flyctl launch \
               --name "${{ env.fly_app_name }}" \
               --no-deploy \
               -o "${{ env.fly_org }}" \
               --region "${{ env.fly_app_region }}" \
               --yes
+
+            cd ..
 
             flyctl scale memory 1024 \
               --app "${{ env.fly_app_name }}"
@@ -96,8 +102,6 @@ jobs:
               --region "${{ env.fly_app_region }}" \
               --app "${{ env.fly_app_name }}" \
               --yes
-
-            rm -f fly.toml
           fi
 
           # Attach Postgres on first deploy — sets DATABASE_URL secret automatically
@@ -120,7 +124,6 @@ jobs:
           sed -i "s|%s3_secret_key%|${{ env.s3_secret_key }}|g"    fly.toml
           sed -i "s|%s3_endpoint%|${{ env.s3_endpoint }}|g"        fly.toml
 
-          # Deploy using the nextcloud/fly.toml config explicitly
           flyctl deploy \
             --config fly.toml \
             --app "${{ env.fly_app_name }}" \
