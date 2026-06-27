@@ -120,7 +120,9 @@ jobs:
           sed -i "s|%s3_secret_key%|${{ env.s3_secret_key }}|g"    fly.toml
           sed -i "s|%s3_endpoint%|${{ env.s3_endpoint }}|g"        fly.toml
 
+          # Deploy using the nextcloud/fly.toml config explicitly
           flyctl deploy \
+            --config fly.toml \
             --app "${{ env.fly_app_name }}" \
             --yes
           cd ..
