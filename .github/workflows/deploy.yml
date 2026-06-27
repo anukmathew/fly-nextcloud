@@ -35,7 +35,7 @@ jobs:
       # ----------------------------------------------------------------
       - name: Deploy & Check Postgres
         run: |
-          if flyctl pg list | grep -q "${{ env.fly_app_name }}-db"; then
+          if flyctl apps list | grep -q "${{ env.fly_app_name }}-db"; then
             echo "Postgres already exists, skipping."
           else
             flyctl pg create \
@@ -49,7 +49,7 @@ jobs:
           fi
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-
+          
       # ----------------------------------------------------------------
       # REDIS (Upstash managed)
       # No VM, no Dockerfile, no builder — one command.
