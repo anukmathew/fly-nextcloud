@@ -33,7 +33,7 @@ jobs:
         run: |
           if [ -z "$(flyctl pg list | grep ${{ env.fly_app_name }}-db)" ]; then
               flyctl pg create --name "${{ env.fly_app_name }}-db" \
-                            --organization "${{ env.fly_org }}" \
+                            -o "${{ env.fly_org }}" \
                             --region "${{ env.fly_app_region }}" \
                             --vm-size "shared-cpu-1x" \
                             --volume-size "1" \
