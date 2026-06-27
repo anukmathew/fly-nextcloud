@@ -58,13 +58,12 @@ jobs:
       # ----------------------------------------------------------------
       - name: Get Redis Connection Details
         run: |
-          # Get the Private URL from plain text output
-          REDIS_URL=$(flyctl redis status "${{ env.fly_app_name }}-redis" | grep "Private URL" | awk '{print $4}')
+          REDIS_URL=$(flyctl redis status "${{ secrets.FLY_APP_NAME }}-redis" | grep "Private URL" | awk '{print $4}')
 
-          # Parse URL — format: redis://PASSWORD@HOST
+          # URL format: redis://default:PASSWORD@HOST
           REDIS_HOST=$(echo $REDIS_URL | sed -E 's|redis://.*@(.*)|\1|')
           REDIS_PORT="6379"
-          REDIS_PASSWORD=$(echo $REDIS_URL | sed -E 's|redis://(.*)@.*|\1|')
+          REDIS_PASSWORD=$(echo $REDIS_URL | sed -E 's|redis://default:(.*)@.*|\1|')
 
           echo "REDIS_HOST=$REDIS_HOST"         >> $GITHUB_ENV
           echo "REDIS_PORT=$REDIS_PORT"         >> $GITHUB_ENV
@@ -80,26 +79,21 @@ jobs:
       # ----------------------------------------------------------------
       - name: Deploy Nextcloud App
         run: |
-          if ! flyctl apps list | grep -q "^${{ env.fly_app_name }} "; then
-
-            # Create the app without touching fly.toml at all
-            flyctl apps create "${{ env.fly_app_name }}" \
-              -o "${{ env.fly_org }}"
-
-            flyctl scale memory 1024 \
-              --app "${{ env.fly_app_name }}"
+          if ! flyctl apps list | grep -q "^${{ secrets.FLY_APP_NAME }} "; then
+            flyctl apps create "${{ secrets.FLY_APP_NAME }}" \
+              -o "${{ secrets.FLY_ORG }}"
 
             flyctl volumes create nextcloud_data \
               --size 1 \
-              --region "${{ env.fly_app_region }}" \
-              --app "${{ env.fly_app_name }}" \
+              --region "${{ secrets.FLY_APP_REGION }}" \
+              --app "${{ secrets.FLY_APP_NAME }}" \
               --yes
           fi
 
-          # Attach Postgres on first deploy — sets DATABASE_URL secret automatically
-          if ! flyctl secrets list --app "${{ env.fly_app_name }}" | grep -q "DATABASE_URL"; then
-            flyctl pg attach "${{ env.fly_app_name }}-db" \
-              --app "${{ env.fly_app_name }}" \
+          # Attach Postgres — sets DATABASE_URL secret automatically
+          if ! flyctl secrets list --app "${{ secrets.FLY_APP_NAME }}" | grep -q "DATABASE_URL"; then
+            flyctl pg attach "${{ secrets.FLY_APP_NAME }}-db" \
+              --app "${{ secrets.FLY_APP_NAME }}" \
               --database-name nextcloud \
               --database-user nextcloud
           fi
@@ -110,20 +104,23 @@ jobs:
           git checkout fly.toml
 
           # Substitute all placeholders
-          sed -i "s|%fly_app_name%|${{ env.fly_app_name }}|g"     fly.toml
-          sed -i "s|%fly_app_region%|${{ env.fly_app_region }}|g"  fly.toml
-          sed -i "s|%redis_host%|${{ env.REDIS_HOST }}|g"          fly.toml
-          sed -i "s|%redis_port%|${{ env.REDIS_PORT }}|g"          fly.toml
-          sed -i "s|%redis_password%|${{ env.REDIS_PASSWORD }}|g"  fly.toml
-          sed -i "s|%s3_bucket_name%|${{ env.s3_bucket_name }}|g"  fly.toml
-          sed -i "s|%s3_access_key%|${{ env.s3_access_key }}|g"    fly.toml
-          sed -i "s|%s3_secret_key%|${{ env.s3_secret_key }}|g"    fly.toml
-          sed -i "s|%s3_endpoint%|${{ env.s3_endpoint }}|g"        fly.toml
+          sed -i "s|%fly_app_name%|${{ secrets.FLY_APP_NAME }}|g"      fly.toml
+          sed -i "s|%fly_app_region%|${{ secrets.FLY_APP_REGION }}|g"  fly.toml
+          sed -i "s|%redis_host%|${{ env.REDIS_HOST }}|g"               fly.toml
+          sed -i "s|%redis_port%|${{ env.REDIS_PORT }}|g"               fly.toml
+          sed -i "s|%redis_password%|${{ env.REDIS_PASSWORD }}|g"       fly.toml
+          sed -i "s|%s3_bucket_name%|${{ secrets.S3_BUCKET_NAME }}|g"  fly.toml
+          sed -i "s|%s3_access_key%|${{ secrets.S3_ACCESS_KEY }}|g"    fly.toml
+          sed -i "s|%s3_secret_key%|${{ secrets.S3_SECRET_KEY }}|g"    fly.toml
+          sed -i "s|%s3_endpoint%|${{ secrets.S3_ENDPOINT }}|g"        fly.toml
 
           flyctl deploy \
             --config fly.toml \
-            --app "${{ env.fly_app_name }}" \
+            --app "${{ secrets.FLY_APP_NAME }}" \
             --yes
           cd ..
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          REDIS_HOST: ${{ env.REDIS_HOST }}
+          REDIS_PORT: ${{ env.REDIS_PORT }}
+          REDIS_PASSWORD: ${{ env.REDIS_PASSWORD }}
