@@ -58,7 +58,10 @@ jobs:
       # ----------------------------------------------------------------
       - name: Get Redis Connection Details
         run: |
-          REDIS_URL=$(flyctl redis status "${{ env.fly_app_name }}-redis" --json | jq -r '.PrivateURL')
+          # Get the Private URL from plain text output
+          REDIS_URL=$(flyctl redis status "${{ env.fly_app_name }}-redis" | grep "Private URL" | awk '{print $4}')
+
+          # Parse URL — format: redis://PASSWORD@HOST
           REDIS_HOST=$(echo $REDIS_URL | sed -E 's|redis://.*@(.*)|\1|')
           REDIS_PORT="6379"
           REDIS_PASSWORD=$(echo $REDIS_URL | sed -E 's|redis://(.*)@.*|\1|')
