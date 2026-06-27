@@ -33,9 +33,7 @@ jobs:
         uses: actions/checkout@v2
 
       - name: Setup Fly
-        run: |
-          # Install flyctl application
-          curl -L https://fly.io/install.sh | FLYCTL_INSTALL=/usr/local sh
+        uses: superfly/flyctl-actions/setup-flyctl@master
 
       - name: Deploy & Check Postgres Cluster
         run: |
