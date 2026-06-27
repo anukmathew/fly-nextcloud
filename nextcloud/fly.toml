@@ -9,18 +9,19 @@ kill_timeout   = "5s"
 [env]
   PHP_MEMORY_LIMIT = "512M"
 
-  # Redis
+  # Redis — Upstash managed
   REDIS_HOST          = "%redis_host%"
   REDIS_HOST_PORT     = "%redis_port%"
   REDIS_HOST_PASSWORD = "%redis_password%"
 
-  # Postgres — DATABASE_URL set by fly pg attach
-  # but Nextcloud Docker image also needs these individually
+  # Postgres — DATABASE_URL set automatically by fly pg attach
+  # Nextcloud Docker image also reads these individual vars on first boot
   POSTGRES_DB       = "nextcloud"
   POSTGRES_USER     = "nextcloud"
-  POSTGRES_HOST     = "%fly_app_name%-db.internal"  # ← ADD THIS
+  POSTGRES_HOST     = "%fly_app_name%-db.internal"
+  POSTGRES_PASSWORD = "%fly_db_password%"
 
-  # R2
+  # Cloudflare R2 object storage
   OBJECTSTORE_S3_SSL            = "true"
   OBJECTSTORE_S3_USEPATH_STYLE  = "true"
   OBJECTSTORE_S3_LEGACYAUTH     = "false"
