@@ -1,59 +1,51 @@
-app = "%fly_app_name%"
-
-kill_signal = "SIGINT"
-kill_timeout = 5
-processes = []
+app            = "%fly_app_name%"
+primary_region = "%fly_app_region%"
+kill_signal    = "SIGINT"
+kill_timeout   = "5s"
 
 [build]
-  build = "Dockerfile"
+  dockerfile = "Dockerfile"
 
 [env]
   PHP_MEMORY_LIMIT = "512M"
-  REDIS_HOST = "%fly_app_name%-redis.internal"
-  REDIS_HOST_PASSWORD = "%fly_redis_password%"
-  POSTGRES_HOST = "%fly_app_name%-db.internal"
-  POSTGRES_PASSWORD="%fly_db_password%"
-  POSTGRES_DB = "nextcloud"
-  POSTGRES_USER = "postgres"
-  OBJECTSTORE_S3_SSL = "true"
-  OBJECTSTORE_S3_USEPATH_STYLE = "false"
-  OBJECTSTORE_S3_LEGACYAUTH = "false"
-  OBJECTSTORE_S3_AUTOCREATE = "true"
-  OBJECTSTORE_S3_BUCKET = "%s3_bucket_name%"
-  OBJECTSTORE_S3_KEY = "%s3_access_key%"
-  OBJECTSTORE_S3_SECRET = "%s3_secret_key%"
-  OBJECTSTORE_S3_HOST = "%s3_endpoint%"
 
+  # Redis — provided by Upstash via fly redis create
+  REDIS_HOST         = "%redis_host%"
+  REDIS_HOST_PORT    = "%redis_port%"
+  REDIS_HOST_PASSWORD = "%redis_password%"
 
-[experimental]
-  allowed_public_ports = []
-  auto_rollback = true
+  # Postgres — DATABASE_URL is set automatically by fly mpg attach
+  # but Nextcloud also needs these individual vars
+  POSTGRES_DB   = "nextcloud"
+  POSTGRES_USER = "fly-user"
+
+  # Cloudflare R2 object storage
+  OBJECTSTORE_S3_SSL           = "true"
+  OBJECTSTORE_S3_USEPATH_STYLE = "true"
+  OBJECTSTORE_S3_LEGACYAUTH    = "false"
+  OBJECTSTORE_S3_AUTOCREATE    = "true"
+  OBJECTSTORE_S3_BUCKET        = "%s3_bucket_name%"
+  OBJECTSTORE_S3_KEY           = "%s3_access_key%"
+  OBJECTSTORE_S3_SECRET        = "%s3_secret_key%"
+  OBJECTSTORE_S3_HOST          = "%s3_endpoint%"
 
 [[mounts]]
+  source      = "nextcloud_data"
   destination = "/var/www/html"
-  source = "nextcloud_data"
 
-[[services]]
-  internal_port = 80
-  protocol = "tcp"
-  script_checks = []
-  http_checks = []
+[http_service]
+  internal_port        = 80
+  force_https          = true
+  auto_stop_machines   = false
+  auto_start_machines  = true
+  min_machines_running = 1
 
-  [services.concurrency]
+  [http_service.concurrency]
+    type       = "connections"
     hard_limit = 2500
     soft_limit = 2000
-    type = "connections"
 
-  [[services.ports]]
-    handlers = ["http"]
-    port = 80
-
-  [[services.ports]]
-    handlers = ["tls", "http"]
-    port = 443
-
-  [[services.tcp_checks]]
-    grace_period = "1s"
-    interval = "30s"
-    restart_limit = 0
-    timeout = "2s"
+[[vm]]
+  memory   = "1gb"
+  cpu_kind = "shared"
+  cpus     = 1
