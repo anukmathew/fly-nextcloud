@@ -31,8 +31,8 @@ jobs:
 
       - name: Deploy & Check Postgres Cluster
         run: |
-          if [ -z "$(fly pg list | grep ${{ env.fly_app_name }}-db)" ]; then
-              fly pg create --name "${{ env.fly_app_name }}-db" \
+          if [ -z "$(flyctl pg list | grep ${{ env.fly_app_name }}-db)" ]; then
+              flyctl pg create --name "${{ env.fly_app_name }}-db" \
                             --organization "${{ env.fly_org }}" \
                             --region "${{ env.fly_app_region }}" \
                             --vm-size "shared-cpu-1x" \
@@ -45,13 +45,13 @@ jobs:
 
       - name: Deploy Redis App
         run: |
-          if [ -z "$(fly apps list | grep '${{ env.fly_app_name }}-redis')" ]; then
-              fly launch --name ${{ env.fly_app_name }}-redis \
+          if [ -z "$(flyctl apps list | grep '${{ env.fly_app_name }}-redis')" ]; then
+              flyctl launch --name ${{ env.fly_app_name }}-redis \
                          --no-deploy \
                          --org ${{ env.fly_org }} \
                          --region ${{ env.fly_app_region }}
 
-              fly volumes create redis_data \
+              flyctl volumes create redis_data \
                  --size 1 \
                  --region ${{ env.fly_app_region }} \
                  --app ${{ env.fly_app_name }}-redis
@@ -62,22 +62,22 @@ jobs:
           cd redis
           sed -i "s/%fly_app_name%/${{ env.fly_app_name }}/g" fly.toml
           sed -i "s/%fly_redis_password%/${{ env.fly_redis_password }}/g" fly.toml
-          fly deploy
+          flyctl deploy
           cd ..
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
       - name: Deploy Nextcloud App
         run: |
-          if [ -z "$(fly apps list | grep '${{ env.fly_app_name }}[^-]')" ]; then
-              fly launch --name ${{ env.fly_app_name }} \
+          if [ -z "$(flyctl apps list | grep '${{ env.fly_app_name }}[^-]')" ]; then
+              flyctl launch --name ${{ env.fly_app_name }} \
                          --no-deploy \
                          --org ${{ env.fly_org }} \
                          --region ${{ env.fly_app_region }}
 
-              fly scale memory 1024
+              flyctl scale memory 1024
 
-              fly volumes create nextcloud_data \
+              flyctl volumes create nextcloud_data \
                  --size 1 \
                  --region ${{ env.fly_app_region }} \
                  --app ${{ env.fly_app_name }}
@@ -93,7 +93,7 @@ jobs:
           sed -i "s/%s3_access_key%/${{ env.s3_access_key }}/g" fly.toml
           sed -i "s/%s3_secret_key%/${{ env.s3_secret_key }}/g" fly.toml
           sed -i "s/%s3_endpoint%/${{ env.s3_endpoint }}/g" fly.toml
-          fly deploy
+          flyctl deploy
           cd ..
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
