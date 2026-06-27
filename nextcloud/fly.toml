@@ -8,6 +8,7 @@ kill_timeout   = "5s"
 
 [env]
   PHP_MEMORY_LIMIT = "512M"
+  NEXTCLOUD_LOGGING_BACKEND = "errorlog"
 
   # ---------------------------------------------------------------
   # Redis — Upstash managed via fly redis create
