@@ -1,8 +1,8 @@
 name: (Re)Deploy Fly-Nextcloud
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 9 * * 0'
+  # schedule:
+    # - cron: '0 9 * * 0'
 
 jobs:
   update-deploy-nextcloud:
